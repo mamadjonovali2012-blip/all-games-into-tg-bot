@@ -178,9 +178,16 @@ function handleAddCollection(ctx, text, state) {
 function handleEditGame(ctx, text, state) {
   const d = state.data;
 
+  if (state.step === 'cover-photo') {
+    if (text === '/cancel') { clearState(ctx.chat.id); ctx.reply('Редактирование отменено.'); return true; }
+    ctx.reply('Отправьте *картинку-обложку* или /cancel:', { parse_mode: 'Markdown' });
+    return true;
+  }
+
   if (state.step === 'which-field') {
     const game = getGame(d.gameId);
     if (!game) { clearState(ctx.chat.id); ctx.reply('Игра не найдена.'); return true; }
+    if (text === '/cancel') { clearState(ctx.chat.id); ctx.reply('Редактирование отменено.'); return true; }
     const field = text.toLowerCase().trim();
     const fields = ['title', 'description', 'genres', 'platforms', 'links', 'cover'];
     if (field === 'done') {
@@ -193,6 +200,11 @@ function handleEditGame(ctx, text, state) {
       return true;
     }
     d.field = field;
+    if (field === 'cover') {
+      state.step = 'cover-photo';
+      ctx.reply('Отправьте *новую обложку* (картинку) или /cancel:', { parse_mode: 'Markdown' });
+      return true;
+    }
     state.step = 'value';
     ctx.reply(`Введите новое значение для \`${field}\` (или /cancel):`, { parse_mode: 'Markdown' });
     return true;
@@ -201,6 +213,7 @@ function handleEditGame(ctx, text, state) {
   if (state.step === 'value') {
     const game = getGame(d.gameId);
     if (!game) { clearState(ctx.chat.id); ctx.reply('Игра не найдена.'); return true; }
+    if (text === '/cancel') { clearState(ctx.chat.id); ctx.reply('Редактирование отменено.'); return true; }
     const patch = {};
     if (d.field === 'genres' || d.field === 'platforms') {
       patch[d.field] = text.split(',').map((s) => s.trim()).filter(Boolean);
@@ -282,12 +295,13 @@ export async function handleAdminCallback(ctx) {
       [Markup.button.callback('⬅ К списку', 'admin:games:list:0')],
     ];
     if (game.coverUrl) {
-      await ctx.editMessageMedia(
-        { type: 'photo', media: game.coverUrl, caption: lines, parse_mode: 'Markdown' },
-        { reply_markup: Markup.inlineKeyboard(buttons).reply_markup }
-      );
+      await ctx.replyWithPhoto(game.coverUrl, {
+        caption: lines,
+        parse_mode: 'Markdown',
+        reply_markup: Markup.inlineKeyboard(buttons).reply_markup,
+      });
     } else {
-      await ctx.editMessageText(lines, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
+      await ctx.reply(lines, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
     }
     return ctx.answerCbQuery();
   }
@@ -339,12 +353,13 @@ export async function handleAdminCallback(ctx) {
       [Markup.button.callback('⬅ Назад', 'admin:news:list')],
     ];
     if (n.imageUrl) {
-      await ctx.editMessageMedia(
-        { type: 'photo', media: n.imageUrl, caption: text, parse_mode: 'Markdown' },
-        { reply_markup: Markup.inlineKeyboard(buttons).reply_markup }
-      );
+      await ctx.replyWithPhoto(n.imageUrl, {
+        caption: text,
+        parse_mode: 'Markdown',
+        reply_markup: Markup.inlineKeyboard(buttons).reply_markup,
+      });
     } else {
-      await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
+      await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
     }
     return ctx.answerCbQuery();
   }

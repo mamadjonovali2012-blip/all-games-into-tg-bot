@@ -1,14 +1,15 @@
 import 'dotenv/config';
+import { createServer } from 'node:http';
 import { Telegraf, Markup } from 'telegraf';
 import { db } from './db.js';
-import { getState, setState, clearState, restoreState } from './wizard.js';
+import { getState, setState, clearState } from './wizard.js';
 import {
-  searchGames, getGame, addGame, updateGame, listGames, totalGames, latestGames,
+  searchGames, getGame, addGame, updateGame, listGames, latestGames,
 } from './games.js';
 import { addNews, listNews, getNews } from './news.js';
 import { listCollections, getCollection } from './collections.js';
 import { adminPanel, adminMiddleware, handleWizardStep, handleAdminCallback, broadcast } from './admin.js';
-import { isAdmin, fmtSize, esc, chunk, stripExt } from './util.js';
+import { isAdmin, fmtSize } from './util.js';
 import { searchRAWGGames } from './rawg.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -261,6 +262,13 @@ bot.on('photo', async (ctx) => {
     clearState(ctx.chat.id);
     return ctx.reply(`✅ Новость «${item.title}» создана!`);
   }
+
+  if (st && st.flow === 'edit-game' && st.step === 'cover-photo' && isAdmin(ctx.from.id)) {
+    const data = st.data;
+    updateGame(data.gameId, { coverUrl: ctx.message.photo[ctx.message.photo.length - 1].file_id });
+    setState(ctx.chat.id, { ...st, step: 'which-field' });
+    return ctx.reply('✅ Обложка обновлена. Что ещё изменить? (или "done")');
+  }
 });
 
 // ============ CALLBACK ============
@@ -307,12 +315,16 @@ bot.on('callback_query', async (ctx) => {
     const text = renderGameCard(game);
     const buttons = gameButtons(game);
     if (game.coverUrl) {
-      return ctx.editMessageMedia(
-        { type: 'photo', media: game.coverUrl, caption: text, parse_mode: 'Markdown' },
-        { reply_markup: Markup.inlineKeyboard(buttons).reply_markup }
-      );
+      return ctx.replyWithPhoto(game.coverUrl, {
+        caption: text,
+        parse_mode: 'Markdown',
+        reply_markup: Markup.inlineKeyboard(buttons).reply_markup,
+      });
     }
-    return ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
+    return ctx.reply(text, {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard(buttons).reply_markup,
+    });
   }
 
   // Скачивание файла
@@ -338,13 +350,11 @@ bot.on('callback_query', async (ctx) => {
     const n = getNews(id);
     if (!n) return ctx.answerCbQuery('Новость не найдена');
     const text = `📰 *${escapeMarkdown(n.title)}*\n\n${escapeMarkdown(n.text)}\n\n🕐 ${new Date(n.createdAt).toLocaleDateString('ru-RU')}`;
+    const kb = Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'menu')]]).reply_markup;
     if (n.imageUrl) {
-      return ctx.editMessageMedia(
-        { type: 'photo', media: n.imageUrl, caption: text, parse_mode: 'Markdown' },
-        { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'menu')]]).reply_markup }
-      );
+      return ctx.replyWithPhoto(n.imageUrl, { caption: text, parse_mode: 'Markdown', reply_markup: kb });
     }
-    return ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'menu')]]).reply_markup });
+    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
   }
 
   // Подборка
@@ -380,7 +390,13 @@ bot.on('callback_query', async (ctx) => {
 
   // Пустышка menu
   if (data === 'menu') {
-    return ctx.editMessageText('Главное меню:', { reply_markup: mainMenu().reply_markup });
+    // Если сообщение с медиа (фото/документ) — редактировать его текстом нельзя,
+    // отправляем новое сообщение
+    const msg = ctx.callbackQuery?.message;
+    if (msg?.photo || msg?.document) {
+      return ctx.reply('Главное меню:');
+    }
+    return ctx.editMessageText('Главное меню:');
   }
 });
 
@@ -406,9 +422,12 @@ function gameButtons(game) {
 }
 
 // ============ ЗАПУСК (схема Render: long polling + health-сервер) ============
-import { createServer } from 'node:http';
-
 const PORT = process.env.PORT || 3000;
+
+// Глобальный перехват ошибок — чтобы бот не падал при сбоях в хендлерах
+bot.catch((err) => {
+  console.error('Bot error:', err?.message || err);
+});
 
 const healthServer = createServer((req, res) => {
   if (req.url === '/') {

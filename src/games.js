@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { uid, stripExt } from './util.js';
+import { uid } from './util.js';
 
 export function searchGames(query) {
   const q = query.toLowerCase();
