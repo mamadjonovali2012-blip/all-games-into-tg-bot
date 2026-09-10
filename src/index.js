@@ -405,10 +405,30 @@ function gameButtons(game) {
   return buttons;
 }
 
-// ============ ЗАПУСК ============
-bot.launch(() => {
+// ============ ЗАПУСК (схема Render: long polling + health-сервер) ============
+import { createServer } from 'node:http';
+
+const PORT = process.env.PORT || 3000;
+
+const healthServer = createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('AllGamesIntoTG bot is running');
+  } else {
+    res.writeHead(404);
+    res.end('Not found');
+  }
+});
+
+healthServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`Health server listening on 0.0.0.0:${PORT}`);
+});
+
+bot.launch().then(() => {
   console.log(`🤖 Бот запущен: ${BOT_USERNAME}`);
   console.log(`Админ: ${isAdmin(8542930176) ? 'да (8542930176)' : 'ID не настроен'}`);
+}).catch((err) => {
+  console.error('Bot launch failed:', err.message);
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
