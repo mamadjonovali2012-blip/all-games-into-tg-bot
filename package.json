@@ -1,0 +1,17 @@
+{
+  "name": "all-games-into-tg-bot",
+  "version": "1.0.0",
+  "description": "Telegram-бот каталога игр — поиск, новости, подборки, файлы",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2",
+    "telegraf": "^4.16.3",
+    "uuid": "^10.0.0"
+  }
+}
