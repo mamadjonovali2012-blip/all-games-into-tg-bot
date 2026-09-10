@@ -273,7 +273,7 @@ bot.on('photo', async (ctx) => {
 
 // ============ CALLBACK ============
 bot.on('callback_query', async (ctx) => {
-  const data = ctx.data;
+  const data = ctx.callbackQuery?.data || '';
   ctx.answerCbQuery().catch(() => {});
 
   // Админские

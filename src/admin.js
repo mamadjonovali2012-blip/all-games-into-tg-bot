@@ -233,7 +233,7 @@ function handleEditGame(ctx, text, state) {
 
 // ---------- Callback-хендлеры ----------
 export async function handleAdminCallback(ctx) {
-  const data = ctx.data;
+  const data = ctx.callbackQuery?.data || '';
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('Нет доступа');
 
   // Старт визардов
