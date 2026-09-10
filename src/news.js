@@ -1,7 +1,6 @@
-import { db } from './db.js';
+import { store } from './db.js';
 
-export function addNews(raw) {
-  const news = db.news.load();
+export async function addNews(raw) {
   const item = {
     id: Date.now().toString(),
     title: raw.title || 'Новость',
@@ -9,19 +8,30 @@ export function addNews(raw) {
     imageUrl: raw.imageUrl || null,
     createdAt: Date.now(),
   };
-  news.unshift(item);
-  db.news.save(news);
+  await store.saveNews(item);
   return item;
 }
 
-export function removeNews(id) {
-  db.news.save(db.news.load().filter((n) => n.id !== id));
+export async function removeNews(id) {
+  await store.deleteNews(id);
 }
 
-export function listNews(limit = 10) {
-  return db.news.load().slice(0, limit);
+export async function listNews(limit = 10) {
+  const all = await store.listNews();
+  return all.slice(0, limit).map(normalize);
 }
 
-export function getNews(id) {
-  return db.news.load().find((n) => n.id === id) || null;
+export async function getNews(id) {
+  const n = await store.getNews(id);
+  return n ? normalize(n) : null;
+}
+
+function normalize(n) {
+  return {
+    id: n.id,
+    title: n.title,
+    text: n.text || '',
+    imageUrl: n.image_url || n.imageUrl || null,
+    createdAt: n.created_at || n.createdAt || 0,
+  };
 }

@@ -1,8 +1,7 @@
-import { db } from './db.js';
+import { store } from './db.js';
 import { uid } from './util.js';
 
-export function createCollection(raw) {
-  const collections = db.collections.load();
+export async function createCollection(raw) {
   const c = {
     id: uid(),
     title: raw.title || 'Подборка',
@@ -10,37 +9,47 @@ export function createCollection(raw) {
     gameIds: raw.gameIds || [],
     createdAt: Date.now(),
   };
-  collections.unshift(c);
-  db.collections.save(collections);
+  await store.saveCollection(c);
   return c;
 }
 
-export function listCollections() {
-  return db.collections.load();
+export async function listCollections() {
+  return (await store.listCollections()).map(normalize);
 }
 
-export function getCollection(id) {
-  return db.collections.load().find((c) => c.id === id) || null;
+export async function getCollection(id) {
+  const c = await store.getCollection(id);
+  return c ? normalize(c) : null;
 }
 
-export function addGameToCollection(collectionId, gameId) {
-  const collections = db.collections.load();
-  const c = collections.find((x) => x.id === collectionId);
+export async function addGameToCollection(collectionId, gameId) {
+  const c = await store.getCollection(collectionId);
   if (!c) return null;
-  if (!c.gameIds.includes(gameId)) c.gameIds.push(gameId);
-  db.collections.save(collections);
-  return c;
+  const updated = normalize(c);
+  if (!updated.gameIds.includes(gameId)) updated.gameIds.push(gameId);
+  await store.saveCollection(updated);
+  return updated;
 }
 
-export function removeGameFromCollection(collectionId, gameId) {
-  const collections = db.collections.load();
-  const c = collections.find((x) => x.id === collectionId);
+export async function removeGameFromCollection(collectionId, gameId) {
+  const c = await store.getCollection(collectionId);
   if (!c) return null;
-  c.gameIds = c.gameIds.filter((g) => g !== gameId);
-  db.collections.save(collections);
-  return c;
+  const updated = normalize(c);
+  updated.gameIds = updated.gameIds.filter((g) => g !== gameId);
+  await store.saveCollection(updated);
+  return updated;
 }
 
-export function removeCollection(id) {
-  db.collections.save(db.collections.load().filter((c) => c.id !== id));
+export async function removeCollection(id) {
+  await store.deleteCollection(id);
+}
+
+function normalize(c) {
+  return {
+    id: c.id,
+    title: c.title,
+    description: c.description || '',
+    gameIds: c.game_ids || c.gameIds || [],
+    createdAt: c.created_at || c.createdAt || 0,
+  };
 }

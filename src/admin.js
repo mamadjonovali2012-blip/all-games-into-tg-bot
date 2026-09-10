@@ -1,9 +1,14 @@
-import { setState, clearState } from './wizard.js';
-import { addGame, getGame, updateGame, removeGame, listGames, totalGames } from './games.js';
+import { setState, clearState, getState } from './wizard.js';
+import {
+  addGame, getGame, updateGame, removeGame, listGames, totalGames, latestGames, topGames,
+} from './games.js';
 import { addNews, removeNews, listNews, getNews } from './news.js';
-import { createCollection, listCollections, getCollection, removeCollection } from './collections.js';
+import {
+  createCollection, listCollections, getCollection, addGameToCollection,
+  removeGameFromCollection, removeCollection,
+} from './collections.js';
 import { isAdmin, fmtSize, esc } from './util.js';
-import { db } from './db.js';
+import { store } from './db.js';
 import { Markup } from 'telegraf';
 
 export function adminMiddleware(ctx, next) {
@@ -14,14 +19,20 @@ export function adminMiddleware(ctx, next) {
   return next();
 }
 
-export function adminPanel(ctx) {
+export async function adminPanel(ctx) {
+  const [gamesCount, newsCount, colsCount, usersCount, downloads] = await Promise.all([
+    totalGames(), listNews().then((n) => n.length), listCollections().then((c) => c.length),
+    store.listUsers().then((u) => u.length), store.totalDownloads(),
+  ]);
   const text = [
     '🗂 *Панель администратора*',
     '',
     `👤 Ваш ID: \`${ctx.from.id}\``,
-    `🎮 Игр в базе: ${totalGames()}`,
-    `📰 Новостей: ${listNews().length}`,
-    `📁 Подборок: ${listCollections().length}`,
+    `🎮 Игр в базе: ${gamesCount}`,
+    `📰 Новостей: ${newsCount}`,
+    `📁 Подборок: ${colsCount}`,
+    `👥 Пользователей: ${usersCount}`,
+    `📥 Скачиваний: ${downloads}`,
     '',
     'Выберите действие:',
   ].join('\n');
@@ -29,30 +40,36 @@ export function adminPanel(ctx) {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       [Markup.button.callback('➕ Добавить игру', 'wiz:game:start')],
+      [Markup.button.callback('🔗 Добавить игру по ссылке', 'wiz:game:link')],
       [Markup.button.callback('📰 Создать новость', 'wiz:news:start')],
       [Markup.button.callback('📁 Новая подборка', 'wiz:collection:start')],
       [Markup.button.callback('🔍 Управление играми', 'admin:games:list:0')],
       [Markup.button.callback('📰 Управление новостями', 'admin:news:list')],
       [Markup.button.callback('📁 Управление подборками', 'admin:collections:list')],
+      [Markup.button.callback('🏆 Топ игр', 'admin:top')],
       [Markup.button.callback('👥 Пользователи', 'admin:users')],
       [Markup.button.callback('📢 Рассылка', 'admin:broadcast')],
     ]).reply_markup,
   });
 }
 
-// ---------- Визард: добавление игры ----------
+// ---------- Визарды ----------
 export function gameWizardStart(ctx) {
   setState(ctx.chat.id, { flow: 'add-game', step: 'title', data: {} });
   ctx.reply('Введите *название игры*:', { parse_mode: 'Markdown' });
   return ctx.answerCbQuery();
 }
 
-// Обработчик шагов визардов — вызывается из роутера
+export function gameWizardLink(ctx) {
+  ctx.reply('🔗 Отправьте *ссылку* на игру (Steam/GOG/официальный магазин):', { parse_mode: 'Markdown' });
+  setState(ctx.chat.id, { flow: 'add-game-link', step: 'link', data: {} });
+  return ctx.answerCbQuery();
+}
+
 export function handleWizardStep(ctx, text) {
   const state = getState(ctx.chat.id);
   if (!state) return false;
 
-  // Визарды доступны только администратору
   if (!isAdmin(ctx.from.id)) {
     clearState(ctx.chat.id);
     ctx.reply('Доступно только администратору.');
@@ -61,6 +78,7 @@ export function handleWizardStep(ctx, text) {
 
   switch (state.flow) {
     case 'add-game': return handleAddGame(ctx, text, state);
+    case 'add-game-link': return handleAddGameLink(ctx, text, state);
     case 'add-news': return handleAddNews(ctx, text, state);
     case 'add-collection': return handleAddCollection(ctx, text, state);
     case 'edit-game': return handleEditGame(ctx, text, state);
@@ -68,35 +86,59 @@ export function handleWizardStep(ctx, text) {
   }
 }
 
-// ---------- ВИЗАРД: добавление игры (название → файл) ----------
+// Визард: название → несколько APK-файлов
 function handleAddGame(ctx, text, state) {
   const d = state.data;
-
   switch (state.step) {
     case 'title':
       d.title = text;
+      d.files = d.files || [];
       state.step = 'file';
-      ctx.reply('📎 Отправьте *файл игры* (zip/rar/7z/exe) или /skip:', { parse_mode: 'Markdown' });
+      ctx.reply('📎 Отправьте *APK-файл(ы) игры*.\n\nМожно несколько — отправляйте по одному.\nКогда закончите — напишите /done.\n(или /skip — без файла)', { parse_mode: 'Markdown' });
       return true;
     case 'file': {
-      if (text === '/skip') {
-        const game = addGame(d);
-        clearState(ctx.chat.id);
-        ctx.reply(`✅ Игра «${game.title}» добавлена без файла.`);
+      if (text === '/done' || text === '/skip') {
+        if (text === '/skip' && d.files.length) {
+          ctx.reply('Уже есть файлы — отправьте /done для завершения.');
+          return true;
+        }
+        addGame(d).then((g) => {
+          clearState(ctx.chat.id);
+          const files = g.files?.length || 0;
+          ctx.reply(`✅ Игра «${g.title}» добавлена!${files ? `\n📦 Файлов: ${files}` : '\n(без файла)'}`);
+        });
         return true;
       }
-      ctx.reply('Отправьте *файл игры* (zip/rar/7z/exe) или /skip:', { parse_mode: 'Markdown' });
+      ctx.reply('Отправьте *APK-файл* или /done (завершить), /skip (без файла):', { parse_mode: 'Markdown' });
       return true;
     }
-    default:
-      return false;
+    default: return false;
   }
 }
 
-// ---------- ВИЗАРД: новость ----------
+// Визард: ссылка → название (добавление по ссылке)
+function handleAddGameLink(ctx, text, state) {
+  const d = state.data;
+  switch (state.step) {
+    case 'link':
+      d.links = { store: text };
+      state.step = 'title';
+      ctx.reply('Введите *название игры*:', { parse_mode: 'Markdown' });
+      return true;
+    case 'title':
+      d.title = text;
+      addGame(d).then((g) => {
+        clearState(ctx.chat.id);
+        ctx.reply(`✅ Игра «${g.title}» добавлена по ссылке!`);
+      });
+      return true;
+    default: return false;
+  }
+}
+
+// Визард: новость
 function handleAddNews(ctx, text, state) {
   const d = state.data;
-
   switch (state.step) {
     case 'title':
       d.title = text;
@@ -110,23 +152,22 @@ function handleAddNews(ctx, text, state) {
       return true;
     case 'image': {
       if (text === '/skip') {
-        const item = addNews(d);
-        clearState(ctx.chat.id);
-        ctx.reply(`✅ Новость «${item.title}» создана!`);
+        addNews(d).then((item) => {
+          clearState(ctx.chat.id);
+          ctx.reply(`✅ Новость «${item.title}» создана!`);
+        });
         return true;
       }
       ctx.reply('Отправьте картинку к новости или /skip:');
       return true;
     }
-    default:
-      return false;
+    default: return false;
   }
 }
 
-// ---------- ВИЗАРД: подборка ----------
+// Визард: подборка
 function handleAddCollection(ctx, text, state) {
   const d = state.data;
-
   switch (state.step) {
     case 'title':
       d.title = text;
@@ -135,23 +176,49 @@ function handleAddCollection(ctx, text, state) {
       return true;
     case 'description': {
       if (text !== '/skip') d.description = text;
-      const c = createCollection(d);
-      clearState(ctx.chat.id);
-      ctx.reply(`✅ Подборка «${c.title}» создана! ID: \`${c.id}\``, { parse_mode: 'Markdown' });
+      createCollection(d).then((c) => {
+        clearState(ctx.chat.id);
+        ctx.reply(`✅ Подборка «${c.title}» создана! ID: \`${c.id}\``, { parse_mode: 'Markdown' });
+      });
       return true;
     }
-    default:
-      return false;
+    default: return false;
   }
 }
 
-// ---------- ВИЗАРД: редактирование игры ----------
+// Визард: редактирование игры (поля через текст)
 function handleEditGame(ctx, text, state) {
   const d = state.data;
 
   if (state.step === 'cover-photo') {
     if (text === '/cancel') { clearState(ctx.chat.id); ctx.reply('Редактирование отменено.'); return true; }
     ctx.reply('Отправьте *картинку-обложку* или /cancel:', { parse_mode: 'Markdown' });
+    return true;
+  }
+
+  if (state.step === 'value' && d.field === 'links') {
+    if (text === '/cancel') { clearState(ctx.chat.id); ctx.reply('Редактирование отменено.'); return true; }
+    updateGame(d.gameId, { links: { store: text } }).then(() => {
+      state.step = 'which-field';
+      ctx.reply('✅ Ссылка обновлена. Что ещё изменить? (или "done")', { parse_mode: 'Markdown' });
+    });
+    return true;
+  }
+
+  if (state.step === 'value') {
+    const game = getGame(d.gameId);
+    if (!game) return true;
+    if (text === '/cancel') { clearState(ctx.chat.id); ctx.reply('Редактирование отменено.'); return true; }
+    const patch = {};
+    if (d.field === 'genres' || d.field === 'platforms') {
+      patch[d.field] = text.split(',').map((s) => s.trim()).filter(Boolean);
+    } else {
+      patch[d.field] = text;
+    }
+    updateGame(d.gameId, patch).then(() => {
+      state.step = 'which-field';
+      ctx.reply(`✅ Поле \`${d.field}\` обновлено. Что ещё изменить? (или "done")`, { parse_mode: 'Markdown' });
+    });
     return true;
   }
 
@@ -181,24 +248,6 @@ function handleEditGame(ctx, text, state) {
     return true;
   }
 
-  if (state.step === 'value') {
-    const game = getGame(d.gameId);
-    if (!game) { clearState(ctx.chat.id); ctx.reply('Игра не найдена.'); return true; }
-    if (text === '/cancel') { clearState(ctx.chat.id); ctx.reply('Редактирование отменено.'); return true; }
-    const patch = {};
-    if (d.field === 'genres' || d.field === 'platforms') {
-      patch[d.field] = text.split(',').map((s) => s.trim()).filter(Boolean);
-    } else if (d.field === 'links') {
-      patch.links = { store: text };
-    } else {
-      patch[d.field] = text;
-    }
-    updateGame(d.gameId, patch);
-    state.step = 'which-field';
-    ctx.reply(`✅ Поле \`${d.field}\` обновлено. Что ещё изменить? (или "done")`, { parse_mode: 'Markdown' });
-    return true;
-  }
-
   return false;
 }
 
@@ -207,8 +256,8 @@ export async function handleAdminCallback(ctx) {
   const data = ctx.callbackQuery?.data || '';
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('Нет доступа');
 
-  // Старт визардов
   if (data === 'wiz:game:start') return gameWizardStart(ctx);
+  if (data === 'wiz:game:link') return gameWizardLink(ctx);
   if (data === 'wiz:news:start') {
     setState(ctx.chat.id, { flow: 'add-news', step: 'title', data: {} });
     ctx.reply('Введите *заголовок новости*:', { parse_mode: 'Markdown' });
@@ -220,21 +269,39 @@ export async function handleAdminCallback(ctx) {
     return ctx.answerCbQuery();
   }
 
-  // Список игр с пагинацией
+  // Топ игр
+  if (data === 'admin:top') {
+    const top = await topGames(10);
+    if (!top.length) {
+      return ctx.editMessageText('Пока нет игр.', {
+        reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'admin:back')]]).reply_markup,
+      });
+    }
+    const lines = top.map((g, i) => `${i + 1}. *${esc(g.title)}* — ${g.downloads || 0} 📥`).join('\n');
+    const buttons = top.slice(0, 5).map((g) =>
+      [Markup.button.callback(`🎮 ${g.title.slice(0, 25)}`, `admin:game:view:${g.id}`)]
+    );
+    buttons.push([Markup.button.callback('⬅ Назад', 'admin:back')]);
+    return ctx.editMessageText(`🏆 *Топ игр по скачиваниям*\n\n${lines}`, {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard(buttons).reply_markup,
+    });
+  }
+
+  // Список игр
   if (data.startsWith('admin:games:list:')) {
     const page = parseInt(data.split(':')[3], 10) || 0;
-    const games = listGames(page, 5);
-    const total = totalGames();
+    const [games, total] = await Promise.all([listGames(page, 5), totalGames()]);
     if (!games.length) {
       return ctx.editMessageText('Игр пока нет.', {
         reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'admin:back')]]).reply_markup,
       });
     }
     const lines = games.map((g, i) =>
-      `${page * 5 + i + 1}. ${esc(g.title)} (${g.fileId ? '📄' : '❌ без файла'})`
+      `${page * 5 + i + 1}. ${esc(g.title)} (${g.fileId ? '📄' : '❌ без файла'}) — ${g.downloads || 0} 📥`
     ).join('\n');
     const buttons = games.map((g) =>
-      [Markup.button.callback(`✏️ ${g.title.slice(0, 25)}`, `admin:game:view:${g.id}`)]
+      [Markup.button.callback(`✏️ ${g.title.slice(0, 22)}`, `admin:game:view:${g.id}`)]
     );
     const nav = [];
     if (page > 0) nav.push(Markup.button.callback('⬅', `admin:games:list:${page - 1}`));
@@ -250,7 +317,7 @@ export async function handleAdminCallback(ctx) {
   // Просмотр игры
   if (data.startsWith('admin:game:view:')) {
     const id = data.split(':')[3];
-    const game = getGame(id);
+    const game = await getGame(id);
     if (!game) return ctx.answerCbQuery('Игра не найдена');
     const lines = [
       `🎮 *${esc(game.title)}*`,
@@ -259,6 +326,7 @@ export async function handleAdminCallback(ctx) {
       game.platforms?.length ? `🖥 Платформы: ${game.platforms.map(esc).join(', ')}` : '',
       game.links?.store ? `🔗 [Ссылка](${game.links.store})` : '',
       game.fileName ? `\n📦 ${esc(game.fileName)} (${fmtSize(game.fileSize)})` : '',
+      `\n📥 Скачиваний: ${game.downloads || 0}`,
     ].join('\n');
     const buttons = [
       [Markup.button.callback('✏️ Редактировать', `admin:game:edit:${id}`)],
@@ -277,7 +345,7 @@ export async function handleAdminCallback(ctx) {
     return ctx.answerCbQuery();
   }
 
-  // Редактирование игры
+  // Редактирование
   if (data.startsWith('admin:game:edit:')) {
     const id = data.split(':')[3];
     setState(ctx.chat.id, { flow: 'edit-game', step: 'which-field', data: { gameId: id } });
@@ -285,12 +353,12 @@ export async function handleAdminCallback(ctx) {
     return ctx.answerCbQuery();
   }
 
-  // Удаление игры
+  // Удаление
   if (data.startsWith('admin:game:delete:')) {
     const id = data.split(':')[3];
-    const game = getGame(id);
+    const game = await getGame(id);
     if (game) {
-      removeGame(id);
+      await removeGame(id);
       await ctx.editMessageText(`❌ Игра «${esc(game.title)}» удалена.`, {
         reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ К списку', 'admin:games:list:0')]]).reply_markup,
       });
@@ -300,7 +368,7 @@ export async function handleAdminCallback(ctx) {
 
   // Новости
   if (data === 'admin:news:list') {
-    const news = listNews(10);
+    const news = await listNews(10);
     if (!news.length) {
       return ctx.editMessageText('Новостей нет.', {
         reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'admin:back')]]).reply_markup,
@@ -316,7 +384,7 @@ export async function handleAdminCallback(ctx) {
 
   if (data.startsWith('admin:news:view:')) {
     const id = data.split(':')[3];
-    const n = getNews(id);
+    const n = await getNews(id);
     if (!n) return ctx.answerCbQuery('Новость не найдена');
     const text = `📰 *${esc(n.title)}*\n\n${esc(n.text)}\n\n🕐 ${new Date(n.createdAt).toLocaleDateString('ru-RU')}`;
     const buttons = [
@@ -324,11 +392,7 @@ export async function handleAdminCallback(ctx) {
       [Markup.button.callback('⬅ Назад', 'admin:news:list')],
     ];
     if (n.imageUrl) {
-      await ctx.replyWithPhoto(n.imageUrl, {
-        caption: text,
-        parse_mode: 'Markdown',
-        reply_markup: Markup.inlineKeyboard(buttons).reply_markup,
-      });
+      await ctx.replyWithPhoto(n.imageUrl, { caption: text, parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
     } else {
       await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
     }
@@ -337,7 +401,7 @@ export async function handleAdminCallback(ctx) {
 
   if (data.startsWith('admin:news:delete:')) {
     const id = data.split(':')[3];
-    removeNews(id);
+    await removeNews(id);
     await ctx.editMessageText('✅ Новость удалена.', {
       reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'admin:news:list')]]).reply_markup,
     });
@@ -346,7 +410,7 @@ export async function handleAdminCallback(ctx) {
 
   // Подборки
   if (data === 'admin:collections:list') {
-    const cols = listCollections();
+    const cols = await listCollections();
     if (!cols.length) {
       return ctx.editMessageText('Подборок нет.', {
         reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'admin:back')]]).reply_markup,
@@ -361,7 +425,7 @@ export async function handleAdminCallback(ctx) {
 
   if (data.startsWith('admin:collection:view:')) {
     const id = data.split(':')[3];
-    const c = getCollection(id);
+    const c = await getCollection(id);
     if (!c) return ctx.answerCbQuery('Не найдено');
     const text = `📁 *${esc(c.title)}*\n\n${c.description ? esc(c.description) + '\n\n' : ''}🎮 Игр: ${c.gameIds.length}\n🆔 \`${c.id}\``;
     const buttons = [
@@ -374,7 +438,7 @@ export async function handleAdminCallback(ctx) {
 
   if (data.startsWith('admin:collection:delete:')) {
     const id = data.split(':')[3];
-    removeCollection(id);
+    await removeCollection(id);
     await ctx.editMessageText('✅ Подборка удалена.', {
       reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'admin:collections:list')]]).reply_markup,
     });
@@ -383,7 +447,7 @@ export async function handleAdminCallback(ctx) {
 
   // Пользователи
   if (data === 'admin:users') {
-    const users = db.users.load();
+    const users = await store.listUsers();
     const text = `👥 *Пользователи*\n\nВсего: ${users.length}\n\n${users.slice(-10).map((u) => `• \`${u.id}\` ${esc(u.name || '')}`).join('\n')}`;
     return ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅ Назад', 'admin:back')]]).reply_markup });
   }
@@ -394,23 +458,24 @@ export async function handleAdminCallback(ctx) {
     return ctx.answerCbQuery();
   }
 
-  // Назад в админку
+  // Назад
   if (data === 'admin:back') {
     return adminPanel(ctx);
   }
 }
 
-// Отправка новостей подписчикам
+// Рассылка
 export async function broadcast(ctx) {
   if (!isAdmin(ctx.from.id)) return ctx.reply('Нет доступа');
   const text = ctx.message.text.replace(/^\/broadcast\s*/, '');
   if (!text) return ctx.reply('Отправьте: /broadcast ваш текст');
-  const users = db.users.load();
+  const users = await store.listUsers();
   let sent = 0;
   for (const u of users) {
     try {
       await ctx.telegram.sendMessage(u.id, `📢 *Рассылка:*\n\n${text}`, { parse_mode: 'Markdown' });
       sent++;
+      await new Promise((r) => setTimeout(r, 35)); // anti-flood
     } catch { /* ignore */ }
   }
   ctx.reply(`✅ Рассылка отправлена ${sent}/${users.length} пользователям.`);
