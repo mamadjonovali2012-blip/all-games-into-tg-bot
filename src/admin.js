@@ -68,45 +68,16 @@ export function handleWizardStep(ctx, text) {
   }
 }
 
-// ---------- ВИЗАРД: добавление игры ----------
+// ---------- ВИЗАРД: добавление игры (название → файл) ----------
 function handleAddGame(ctx, text, state) {
   const d = state.data;
 
   switch (state.step) {
     case 'title':
       d.title = text;
-      state.step = 'description';
-      ctx.reply('Введите *описание* игры (или /skip):', { parse_mode: 'Markdown' });
+      state.step = 'file';
+      ctx.reply('📎 Отправьте *файл игры* (zip/rar/7z/exe) или /skip:', { parse_mode: 'Markdown' });
       return true;
-    case 'description':
-      if (text !== '/skip') d.description = text;
-      state.step = 'genres';
-      ctx.reply('Введите *жанры* через запятую (или /skip):', { parse_mode: 'Markdown' });
-      return true;
-    case 'genres':
-      if (text !== '/skip') d.genres = text.split(',').map((s) => s.trim()).filter(Boolean);
-      state.step = 'platforms';
-      ctx.reply('Введите *платформы* через запятую: PC, PlayStation, Xbox, Nintendo (или /skip):', { parse_mode: 'Markdown' });
-      return true;
-    case 'platforms':
-      if (text !== '/skip') d.platforms = text.split(',').map((s) => s.trim()).filter(Boolean);
-      state.step = 'links';
-      ctx.reply('Введите *ссылку* на игру (Steam/GOG/официальный магазин) или /skip:', { parse_mode: 'Markdown' });
-      return true;
-    case 'links':
-      if (text !== '/skip') d.links = { store: text };
-      state.step = 'cover';
-      ctx.reply('Отправьте *обложку* (картинку) или /skip:', { parse_mode: 'Markdown' });
-      return true;
-    case 'cover': {
-      if (text === '/skip') {
-        state.step = 'file';
-        ctx.reply('Отправьте *файл игры* (zip/rar/7z/exe) или /skip:', { parse_mode: 'Markdown' });
-        return true;
-      }
-      ctx.reply('Отправьте картинку-обложку или /skip:');
-      return true;
-    }
     case 'file': {
       if (text === '/skip') {
         const game = addGame(d);
@@ -114,7 +85,7 @@ function handleAddGame(ctx, text, state) {
         ctx.reply(`✅ Игра «${game.title}» добавлена без файла.`);
         return true;
       }
-      ctx.reply('Отправьте файл игры (zip/rar/7z/exe) или /skip:');
+      ctx.reply('Отправьте *файл игры* (zip/rar/7z/exe) или /skip:', { parse_mode: 'Markdown' });
       return true;
     }
     default:

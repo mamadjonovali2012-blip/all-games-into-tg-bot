@@ -248,13 +248,6 @@ bot.on('document', async (ctx) => {
 bot.on('photo', async (ctx) => {
   const st = getState(ctx.chat.id);
 
-  if (st && st.flow === 'add-game' && st.step === 'cover' && isAdmin(ctx.from.id)) {
-    const data = st.data;
-    data.coverUrl = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-    setState(ctx.chat.id, { ...st, step: 'file' });
-    return ctx.reply('📎 Отправьте *файл игры* (zip/rar/7z/exe) или /skip:', { parse_mode: 'Markdown' });
-  }
-
   if (st && st.flow === 'add-news' && st.step === 'image' && isAdmin(ctx.from.id)) {
     const data = st.data;
     data.imageUrl = ctx.message.photo[ctx.message.photo.length - 1].file_id;
