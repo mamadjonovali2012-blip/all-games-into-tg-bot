@@ -83,15 +83,24 @@ data/                 # JSON-файлы (создаются при первом 
 
 ### На Render (рекомендуется, бесплатный тариф)
 
-Проект уже настроен под Render: в `render.yaml` лежит Blueprint, `src/app.js` сам поднимает HTTP-сервер с health-check (`/` → «AllGamesIntoTG bot is running») и автоматически ставит вебхук на `${RENDER_EXTERNAL_URL}/webhook`.
+Проект уже настроен под Render: в `render.yaml` лежит Blueprint, `src/index.js` поднимает HTTP-сервер с health-check (`/` → «AllGamesIntoTG bot is running») и работает в long-polling режиме (как quran-ai-bot).
 
-1. Залейте репозиторий на GitHub
-2. На [render.com](https://render.com) → **New +** → **Blueprint**
-3. Выберите репозиторий — Render сам прочитает `render.yaml`
-4. Задайте секретные переменные: `BOT_TOKEN` (и опционально `RAWG_API_KEY`)
-5. Deploy — бот поднимется сам, вебхук зарегистрируется автоматически
+1. Залейте репозиторий на GitHub (уже сделано: `mamadjonovali2012-blip/all-games-into-tg-bot`)
+2. На [render.com](https://render.com) → **New +** → **Blueprint** → выберите репозиторий — Render сам прочитает `render.yaml`
+3. Задайте секреты: в `BOT_TOKEN` впишите токен бота (поля `sync: false`)
+4. Deploy — бот поднимется за 1–2 минуты и сразу заработает
 
-> ⚠️ На бесплатном тарифе Render «усыпляет» сервис после 15 минут без трафика. Пока сервис спит, вебхук Telegram не отвечает (бот «молчит»); после первого запроса к сайту он просыпается. Для круглосуточной работы — платный тариф или [UptimeRobot](https://uptimerobot.com) пингом раз в 10 минут.
+**Автодеплой:** в `render.yaml` стоит `autoDeploy: true` и `buildCommand: npm ci` — каждый пуш в GitHub автоматически пересобирает и перезапускает бота, установка зависимостей идёт быстро (npm ci).
+
+### Чтобы бот не «засыпал» (аптайм)
+
+На бесплатном тарифе Render «усыпляет» сервис после ~15 минут без трафика — long polling останавливается, бот молчит. Решение — внешний пинг каждые 10 минут (бесплатно, без прав GitHub):
+
+1. Зарегистрируйтесь на [cron-job.org](https://cron-job.org) (или используйте UptimeRobot)
+2. Создайте задачу: **URL** = URL вашего сервиса (например `https://all-games-into-tg-bot.onrender.com`), **интервал** = 10 минут
+3. Cron-job будет дёргать health-эндпоинт — Render считает сервис активным и не усыпляет
+
+Бот отвечает на `GET /` текстом «AllGamesIntoTG bot is running» — пингер будет видеть, что всё живо (200 OK).
 
 ### Обычный сервер / VPS
 
@@ -100,4 +109,4 @@ npm ci
 npm start   # long-polling, без вебхука
 ```
 
-Для продакшена — `pm2 start src/app.js` или systemd.
+Для продакшена — `pm2 start src/index.js` или systemd.
