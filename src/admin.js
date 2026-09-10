@@ -52,6 +52,13 @@ export function handleWizardStep(ctx, text) {
   const state = getState(ctx.chat.id);
   if (!state) return false;
 
+  // Визарды доступны только администратору
+  if (!isAdmin(ctx.from.id)) {
+    clearState(ctx.chat.id);
+    ctx.reply('Доступно только администратору.');
+    return true;
+  }
+
   switch (state.flow) {
     case 'add-game': return handleAddGame(ctx, text, state);
     case 'add-news': return handleAddNews(ctx, text, state);

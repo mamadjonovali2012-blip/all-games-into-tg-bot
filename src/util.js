@@ -1,8 +1,11 @@
-export const ADMIN_IDS = (process.env.ADMIN_IDS || '')
+const ENV_IDS = (process.env.ADMIN_IDS || '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
   .map(Number);
+
+// Если ADMIN_IDS не задан — админ только владелец бота (8542930176)
+export const ADMIN_IDS = ENV_IDS.length ? ENV_IDS : [8542930176];
 
 export const isAdmin = (id) => ADMIN_IDS.includes(Number(id));
 
