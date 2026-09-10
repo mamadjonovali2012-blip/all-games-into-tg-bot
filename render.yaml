@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: all-games-into-tg-bot
+    env: node
+    buildCommand: npm ci
+    startCommand: npm start
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        value: "8542930176"
+      - key: BOT_USERNAME
+        value: "@AllGamesIntoTG"
+      - key: RAWG_API_KEY
+        sync: false
+    healthCheckPath: /

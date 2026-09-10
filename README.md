@@ -81,4 +81,23 @@ data/                 # JSON-файлы (создаются при первом 
 
 ## Деплой
 
-Бот работает в long-polling режиме — достаточно запустить `npm start` на любом сервере (VPS, Render, Railway). Для продакшена рекомендуется `pm2 start src/index.js` или systemd-юнит.
+### На Render (рекомендуется, бесплатный тариф)
+
+Проект уже настроен под Render: в `render.yaml` лежит Blueprint, `src/app.js` сам поднимает HTTP-сервер с health-check (`/` → «AllGamesIntoTG bot is running») и автоматически ставит вебхук на `${RENDER_EXTERNAL_URL}/webhook`.
+
+1. Залейте репозиторий на GitHub
+2. На [render.com](https://render.com) → **New +** → **Blueprint**
+3. Выберите репозиторий — Render сам прочитает `render.yaml`
+4. Задайте секретные переменные: `BOT_TOKEN` (и опционально `RAWG_API_KEY`)
+5. Deploy — бот поднимется сам, вебхук зарегистрируется автоматически
+
+> ⚠️ На бесплатном тарифе Render «усыпляет» сервис после 15 минут без трафика. Пока сервис спит, вебхук Telegram не отвечает (бот «молчит»); после первого запроса к сайту он просыпается. Для круглосуточной работы — платный тариф или [UptimeRobot](https://uptimerobot.com) пингом раз в 10 минут.
+
+### Обычный сервер / VPS
+
+```bash
+npm ci
+npm start   # long-polling, без вебхука
+```
+
+Для продакшена — `pm2 start src/app.js` или systemd.
