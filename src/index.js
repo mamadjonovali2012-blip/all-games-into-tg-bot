@@ -21,6 +21,29 @@ if (!BOT_TOKEN) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// Список команд + кнопка меню «≡» внизу чата — настраивается при старте
+async function setupCommands() {
+  const commands = [
+    { command: '/start', description: '♻️ Перезапустить бота' },
+    { command: '/search', description: '🔍 Поиск игры' },
+    { command: '/games', description: '🎮 Все игры' },
+    { command: '/latest', description: '🆕 Новинки' },
+    { command: '/top', description: '🏆 Топ игр' },
+    { command: '/news', description: '📰 Новости' },
+    { command: '/collections', description: '📁 Подборки' },
+    { command: '/help', description: '❓ Помощь' },
+    { command: '/admin', description: '🛠 Админ-панель' },
+  ];
+  try {
+    await bot.telegram.setMyCommands(commands);
+    await bot.telegram.setChatMenuButton({ menu_button: { type: 'commands' } });
+    console.log('✅ Меню команд и кнопка «≡» настроены');
+  } catch (e) {
+    console.error('Не удалось настроить меню команд:', e.message);
+  }
+}
+setupCommands();
+
 // ---- Регистрация пользователя ----
 bot.use(async (ctx, next) => {
   if (ctx.from) {
@@ -426,7 +449,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Health server listening on 0.0.0.0:${PORT}`);
 });
 
-bot.launch().then(() => {
+bot.launch().then(async () => {
   console.log(`🤖 Бот запущен: ${BOT_USERNAME}`);
   console.log(`Админ: ${isAdmin(8542930176) ? 'да (8542930176)' : 'ID не настроен'}`);
 }).catch((err) => {
